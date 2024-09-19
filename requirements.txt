@@ -2,13 +2,11 @@ llama-cpp-python==0.2.81
 transformers==4.42.3
 sentencepiece==0.2.0
 protobuf==5.27.2
-faiss-cpu==1.8.0.post1
 sentence-transformers==3.0.1
 pandas==2.2.2
 beautifulsoup4==4.12.3
-langchain==0.2.12
 rouge-score==0.1.2
-langchain-community==0.2.11
 bert-score==0.3.13
 evaluate==0.4.2
 accelerate==0.33.0 
+openai==1.46.0
