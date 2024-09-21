@@ -1,6 +1,5 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
-from llama_cpp import Llama
 from typing import List, Dict
 from collections import defaultdict
 from itertools import combinations
@@ -11,12 +10,14 @@ from functools import partial
 import random
 from argparse import ArgumentParser
 import json
+from dotenv import load_dotenv, find_dotenv
 from .utils import gen_dialogue_util, generate_sub_topics, generate_personas, llm_judge
 from .quality_metrics import calculate_metrics, g_eval, gpt_score, fed
 from .prompts import dialog_system_prompt_cot, summ_prompt
 
+load_dotenv(find_dotenv())
 
-client = OpenAI()
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 def generate_dialogues(topic_personas:Dict[str,List[str]], system_prompt:str, sample_dialogues: List[Dict[str, str]]) -> pd.DataFrame:
     """
@@ -40,7 +41,7 @@ def generate_summary(df: pd.DataFrame, sample_dialogues: List[Dict[str, str]]) -
         completion = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "cotent": summ_prompt.format(
+                {"role": "system", "content": summ_prompt.format(
                     dialogue_1=sample_dialogues[0]['dialogue'], summary_1=sample_dialogues[0]['summary'],
                     dialogue_2=sample_dialogues[1]['dialogue'], summary_2=sample_dialogues[1]['summary'],
                 )},
@@ -49,7 +50,7 @@ def generate_summary(df: pd.DataFrame, sample_dialogues: List[Dict[str, str]]) -
             temperature=0.3, 
             max_tokens=256
         )
-        op = completion.choices[0].message
+        op = completion.choices[0].message.content
         summaries.append(op)
     df['summary'] = summaries
     return df
@@ -91,7 +92,7 @@ def sdg(csv_path:str, topics_file:str=None, n_sub_topics:int=None, n_personas:in
                 new_df = generate_dialogues(topic_personas=sub_topic_personas, system_prompt=dialog_system_prompt_cot, sample_dialogues=sample_dialogues)
                 df = pd.concat([df, new_df], axis=0, ignore_index=True)
                 print(f'\tdialogs generated for {base_topic}') 
-        
+                df.to_csv(csv_path, index=False)
             except Exception as e:
                 print(f'\t ran into error: {e} for the topic: {base_topic}, moving on... ')
         df.to_csv(csv_path, index=False)

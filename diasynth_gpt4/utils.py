@@ -5,9 +5,13 @@ import pandas as pd
 import re
 from bs4 import BeautifulSoup
 from openai import OpenAI
+from dotenv import load_dotenv, find_dotenv
+import os
 from .prompts import generate_personas_prompt, generate_topics_prompt, judge_prompt, summ_prompt
 
-client = OpenAI()
+load_dotenv(find_dotenv())
+
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 def calculate_rouge_l(topic1: str, topic2: str) -> float:
     """calculates ROUGE-L between two strings"""
@@ -42,7 +46,7 @@ def generate_sub_topics(topic: str, n_sub_topics: int) -> List[str]:
          ],
          temperature=0.1, max_tokens=2048
     )
-    topics = completion.choices[0].message
+    topics = completion.choices[0].message.content
     start_idx, end_idx = topics.find('['), topics.find(']')
     topics = ast.literal_eval(topics[start_idx:end_idx+1])[:n_sub_topics]
     topics = filter_repeated_topics(topics)
@@ -64,7 +68,7 @@ def generate_personas(topic: str, n_personas: int) -> List[str]:
          max_tokens=2048,
          temperature=0.1
     )
-    personas = completion.choices[0].message
+    personas = completion.choices[0].message.content
     start_idx, end_idx = personas.find('['), personas.find(']')
     personas = ast.literal_eval(personas[start_idx:end_idx+1])[:n_personas]
     personas = filter_repeated_topics(personas)
@@ -91,12 +95,12 @@ def gen_dialogue_util(system_prompt: str, args: Dict[str, str], sample_dialogues
         )
         
         cot, dialogue = '', ''
-        soup = BeautifulSoup(completion.choices[0].message, 'html.parser')
+        soup = BeautifulSoup(completion.choices[0].message.content, 'html.parser')
         if soup.find('dialogue'): dialogue = soup.find('dialogue').text
         if soup.find('cot'): cot = soup.find('cot').text
         if len(dialogue)>0 and len(cot)>0: return cot, dialogue
         else:
-            txt = completion.choices[0].message
+            txt = completion.choices[0].message.content
             if '<dialogue>' in txt and '</dialogue>' in txt:
                     start_idx = txt.find('<dialogue>') + len('<dialogue>')
                     end_idx = txt.find('</dialogue>')
@@ -127,7 +131,7 @@ def llm_judge(df: pd.DataFrame) -> pd.DataFrame:
             max_tokens=1024
         ) 
         pattern = re.compile(r'Score:\s*\d+')
-        score = pattern.findall(completion.choices[0].message)[0]
+        score = pattern.findall(completion.choices[0].message.content)[0]
         
         try: llm_judge_scores.append(int(score[-2:].strip()))
         except:llm_judge_scores.append(completion.choices[0].message)
