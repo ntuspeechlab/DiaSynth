@@ -2,13 +2,12 @@ from transformers import AutoTokenizer, LEDForConditionalGeneration, T5ForCondit
 from transformers import TrainingArguments, Trainer
 import pandas as pd
 import os
-from datasets import load_dataset, DatasetDict, Dataset, concatenate_datasets
+from datasets import load_dataset, DatasetDict, Dataset 
 from argparse import ArgumentParser
 from functools import partial
 import torch
 import random
 from .summarization_metrics import score_summary
-from .relevance_redund import final_evaluation_score
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f'running on {device}')
@@ -57,94 +56,51 @@ def finetune(csv_path: str, input_max_length: int, output_max_length: int, dialo
     dialogue_ds_dict = DatasetDict({"train": train_sample, "test": dialogue_ds_test})
     print(sd_dict)
 
+    # select random samples
     dialogues_summaries = dialogue_ds_test.to_pandas().to_dict(orient="records") # contains id, dialogue, summary
 
-    generate_summaries(dialogues_summaries=dialogues_summaries, model=model, tokenizer=tokenizer, input_max_length=input_max_length, output_max_length=output_max_length)
-    score_before_finetuning = final_evaluation_score(documents=[d["dialogue"] for d in dialogues_summaries],
-                                                     summaries=[d["predicted_summary"] for d in dialogues_summaries])
-    with open(log_filename, "a") as f:
-        f.write(f"score before finetuning: {score_before_finetuning}\n")
 
     fn = partial(convert_examples_to_features, tokenizer=tokenizer, input_max_length=input_max_length, output_max_length=output_max_length)
     sd_dict_pt = sd_dict.map(fn, batched=True)
-    dialogue_ds_dict_pt = dialogue_ds_dict.map(fn, batched=True)
     columns = ["input_ids", "labels", "attention_mask"]
     sd_dict_pt = sd_dict_pt.remove_columns([col for col in sd_dict_pt.column_names['train'] if col not in columns])
-    dialogue_ds_dict_pt = dialogue_ds_dict_pt.remove_columns([col for col in dialogue_ds_dict_pt.column_names['train'] if col not in columns])
-
+    
     seq2seq_data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
-
     training_args = TrainingArguments(
         output_dir=f"{root_folder}/sdg_{dialogue_base}",
-        num_train_epochs=2,
-        warmup_steps=50,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
+        num_train_epochs=2,  
+        warmup_steps=50,  
+        per_device_train_batch_size=8,  
+        per_device_eval_batch_size=8, 
         weight_decay=0.01,
-        logging_steps=0,
+        logging_steps=10,
         evaluation_strategy='steps',
-        eval_steps=50,
-        save_steps=0,
+        eval_steps=50,  
+        save_steps=500,  
         gradient_accumulation_steps=2,
         learning_rate=5e-5,
-        push_to_hub=False,
-        logging_dir=None
+        push_to_hub=False
     )
     trainer = Trainer(
-        model=model,
-        tokenizer=tokenizer,
-        args=training_args,
-        train_dataset=dialogue_ds_dict_pt['train'],
-        eval_dataset=dialogue_ds_dict_pt['test'],
-        data_collator=seq2seq_data_collator
-    )
-    trainer.train()
-    print(f'training done on in-domain data, generating summaries now..')
-    generate_summaries(dialogues_summaries=dialogues_summaries, model=model, tokenizer=tokenizer, input_max_length=input_max_length, output_max_length=output_max_length)
-
-    score_after_finetuning_indomain = final_evaluation_score(documents=[d["dialogue"] for d in dialogues_summaries],
-                                                     summaries=[d["predicted_summary"] for d in dialogues_summaries])
-    with open(log_filename, "a") as f:
-        f.write(f"score after finetuning on in-domain data: {score_after_finetuning_indomain}\n")
-
-
-    del model
-    model = model_map[model_id].from_pretrained(model_id).to(device)
-
-
-    training_args = TrainingArguments(
-        output_dir=f"{root_folder}/sdg_{dialogue_base}",
-        num_train_epochs=2,
-        warmup_steps=50,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        weight_decay=0.01,
-        logging_steps=0,
-        evaluation_strategy='steps',
-        eval_steps=50,
-        save_steps=0,
-        gradient_accumulation_steps=2,
-        learning_rate=5e-5,
-        push_to_hub=False,
-        logging_dir=None
-    )
-    trainer = Trainer(
-        model=model,
-        tokenizer=tokenizer,
-        args=training_args,
-        train_dataset=sd_dict_pt['train'],
+        model=model,  
+        tokenizer=tokenizer,     
+        args=training_args,                  
+        train_dataset=sd_dict_pt['train'],         
         eval_dataset=sd_dict_pt['test'],
-        data_collator=seq2seq_data_collator
+        data_collator=seq2seq_data_collator           
     )
     trainer.train()
     print(f'training done on sdg, generating summaries now..')
     generate_summaries(dialogues_summaries=dialogues_summaries, model=model, tokenizer=tokenizer, input_max_length=input_max_length, output_max_length=output_max_length)
-
-    score_after_finetuning_sdg = final_evaluation_score(documents=[d["dialogue"] for d in dialogues_summaries],
-                                                     summaries=[d["predicted_summary"] for d in dialogues_summaries])
-    with open(log_filename, "a") as f:
-        f.write(f"score after finetuning on sdg: {score_after_finetuning_sdg}\n")
-
+    post_finetune_scores_dialogue_sd = score_summary(dialogues_summaries=dialogues_summaries, dialogue_base=dialogue_base)
+    with open(log_filename, 'a') as f:
+        f.write(f'scores after finetuning on sdg:\n')
+        print(f'scores after finetuning on sdg:')
+        for metric, score_list in post_finetune_scores_dialogue_sd.items():
+            f.write(f"\t{metric}: {sum(score_list)/len(score_list)}\n")
+            print(f"\t{metric}: {sum(score_list)/len(score_list)}")
+    
+    trainer.save_model(f"{model_id.replace('/', '_').replace('-', '_')}_{base_model}_{dialogue_base}")
 
 if __name__ == "__main__":
 
